@@ -7,7 +7,7 @@ if os:
 
 
 from aenum import Enum, auto, extend_enum
-from dpath.util import get as dget, set as dset,  new as dnew, delete as ddelete
+
 from functools import partial
 import functools
 import traceback
@@ -16,25 +16,16 @@ from typing import NamedTuple, Any
 import justpy as jp
 
 
-def dpop(addict, dpath):
-    assert(dpath[-1] != '/')
-    pk = dpath.split("/")
-    ppath = "/".join(pk[:-1])
-    pkey = pk[-1]
-    pnode = addict
-    if ppath != "":
-        pnode = dget(addict, ppath)
-    pnode.pop(pkey, None)
 
 
-def dupdate(addict, path, value):
-    # skip if path not already present
-    try:
-        dpop(addict, path)
+# def dupdate(addict, path, value):
+#     # skip if path not already present
+#     try:
+#         dpop(addict, path)
 
-    except Exception as e:
-        raise e
-    dnew(addict, path, value)
+#     except Exception as e:
+#         raise e
+#     dnew(addict, path, value)
 
 
 class ReactTag_AppstateUpdate(Enum):
@@ -89,6 +80,13 @@ class TaskStack:
         self.tasks.append(taskset)
 
 
+class OpStatus(Enum):
+    SUCCESS = auto()
+    FAILED = auto()
+    INPROGRESS = auto()
+    pass
+
+
 class ReactTag_UI(Enum):
     """tags for actions the update the frontend ui 
     """
@@ -107,7 +105,8 @@ def run_looprunner(page: jp.WebPage, rts: TaskStack):
     for tag, arg in rts.taskIter():
         logger.info(f"current tasktag = {tag}")
         if isinstance(tag, ReactTag_AppstateUpdate):
-            update_appstate_and_ui, newtaskset = tag.value(page.appstate, arg)
+            update_appstate_and_ui, newtaskset = tag.value(
+                page.appstate, arg)
             if newtaskset:
                 rts.addTaskSet(newtaskset)
         if isinstance(tag, ReactTag_BackendAction):
@@ -121,6 +120,39 @@ def run_looprunner(page: jp.WebPage, rts: TaskStack):
     if update_appstate_and_ui:
         print("looprunner: calling update_appstate_and_ui")
         page.update_appstate_and_ui()
+
+
+def CfgLoopRunner(func):
+    '''run react-update ui loop for event hangles
+
+    '''
+    @functools.wraps(func)
+    def signal_wrapper(*args, **kwargs):
+        '''
+        wrap ui_action_signal to follow
+        model_update_view cycle
+        '''
+        #func(*args, **kwargs)
+        #run_looprunner(page, rts)
+
+        dbref = args[0]
+        spath = dbref.stub.spath
+        msg = args[1]
+
+        wp = msg.page
+
+        #analytics_dashboard uses dummy function for event handler
+        value = func(*args, **kwargs)
+        if not value: 
+            value = msg.value
+        logger.debug(f"=====> begin cfgLoopRunner: react-to-event: {spath} {value}")            
+        wp.cfg_ui_setval(spath, value)
+        wp.cfg_update_loop()
+        logger.debug("=====> end cfgLoopRunner")
+
+        pass
+        # func(*args, **kwargs)
+    return signal_wrapper
 
 
 def LoopRunner(func):
@@ -141,7 +173,7 @@ def LoopRunner(func):
 
 
 def UpdateAppStateAndUI(func):
-    '''Tells the MRVWLR loop runner to 
+    '''Tells the  loop runner to 
     update appstate and UI based on changes
     to cfg_appstate and cfg_ui.
     '''
