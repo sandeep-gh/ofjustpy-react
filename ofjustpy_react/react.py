@@ -142,12 +142,13 @@ def CfgLoopRunner(func):
         wp = msg.page
 
         #analytics_dashboard uses dummy function for event handler
-        value = func(*args, **kwargs)
-        if not value: 
-            value = msg.value
-        logger.debug(f"=====> begin cfgLoopRunner: react-to-event: {spath} {value}")            
-        wp.cfg_ui_setval(spath, value)
-        wp.cfg_update_loop()
+        sspath, svalue = func(*args, **kwargs)
+        # if not value: 
+        #     value = msg.value
+        logger.debug(f"=====> begin cfgLoopRunner: react-to-event: {sspath} {svalue}")
+        #
+        wp.update_uistate(sspath, svalue)
+        wp.update_loop()
         logger.debug("=====> end cfgLoopRunner")
 
         pass
