@@ -1,4 +1,4 @@
-from aenum import Enum, auto
+from aenum import Enum, auto, IntEnum
 import logging
 import os
 if os:
@@ -80,7 +80,7 @@ class TaskStack:
         self.tasks.append(taskset)
 
 
-class OpStatus(Enum):
+class OpStatus(IntEnum):
     SUCCESS = auto()
     FAILED = auto()
     INPROGRESS = auto()
