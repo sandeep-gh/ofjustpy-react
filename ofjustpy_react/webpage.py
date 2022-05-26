@@ -11,10 +11,20 @@ if logging:
 
 
 
-
+import inspect
 import justpy as jp
 from addict import Dict
 import ofjustpy as oj
+
+def is_mod_function(mod, func):
+    return inspect.isfunction(func) and inspect.getmodule(func) == mod
+
+
+def list_functions(mod):
+    return filter(lambda func, mod=mod: is_mod_function(mod, func),
+                  mod.__dict__.values()
+                  )
+
 
 class OpaqueDict(NamedTuple):
     """
@@ -24,6 +34,11 @@ class OpaqueDict(NamedTuple):
     pass
 
 
+class UIAppCtx(NamedTuple):
+    uipath: Any
+    apppath: Any
+    valueop: Any
+    
 class AttrMeta(NamedTuple):
     """
     metadata about ui component
@@ -46,7 +61,7 @@ def isstr(val):
 
 
 class Ctx(NamedTuple):
-    path: Any
+    apppath: Any
     condition: Any
     uiop: Any
     
@@ -61,33 +76,29 @@ class UIOps(Enum):
     #redirect to new page
     REDIRECT = auto()
     
-def components_in_appstate_changectx(kpath, val,  app_ui_trmap):
+def components_in_appstate_changectx(apppath, val,  appctx_uiupdate_map):
     """
     which components have registered for the change.
     returns components path in cfgCM
     """
 
-    for path, am in oj.dictWalker(app_ui_trmap):
-        #am: attrmeta
-        # TODO: this check should become more sophisticated
-        # moving to a sophisticated check
-        for ctx in am.appstate_context:
-            if kpath == ctx.path:
-                # candidate_ctx[1] is either a string value or a lambda
-                if ctx.condition(val):
-                    yield path, ctx.uiop
+    try:
+        spath, appchangectx = oj.dget(appctx_uiupdate_map,  apppath)
+        if appchangectx.condition(val):
+            yield spath, appchangectx
+    except Exception as e:
+        logger.debug(f"{kpath} not in appctx_uiupdate_map {e}")
 
                     
-def uiops_for_appstate_change_ctx_kpath(kpath, val, app_ui_trmap, appstate):
+def uiops_for_appstate_change_ctx_kpath(kpath, val, appctx_uiupdate_map, appstate):
     """
     update cfgCM in response to  changes in appstate at kpath
     """
-    ctx = (kpath, val)
 
-    logger.debug(f"evaluation ctx: {ctx}")
-    paths_in_context = [
-        _ for _ in components_in_appstate_changectx(kpath, val,  app_ui_trmap)]
-    for path, uiop in paths_in_context:
+    logger.debug(f"evaluation ctx: apppath:{kpath} val={val}")
+    affected_uis = [
+        _ for _ in components_in_appstate_changectx(kpath, val,  appctx_uiupdate_map)]
+    for spath, appchangectx in affected_uis:
         # TODO: we should change something for sure.
         # the bojective is to update the ui with newly added data model
         # dget(stubStore, path).target.update(val)
@@ -99,24 +110,25 @@ def uiops_for_appstate_change_ctx_kpath(kpath, val, app_ui_trmap, appstate):
         #     case UIOps.DISABLE:
         #         #dset(cfg_ui, path, "disabled")
         logger.info(
-            f"changing ui for {path} with uiop {uiop}")
+            f"changing ui for {spath} with uiop {appchangectx.uiop}")
 
-        yield path, val, uiop
-        pass
+        yield spath, val, appchangectx.uiop
 
 
-def uiops_for_appstate_change_ctx(appstate, app_ui_trmap, new_inactive_kpaths=[], path_guards = None):
+
+def uiops_for_appstate_change_ctx(appstate, appctx_uiupdate_map, new_inactive_kpaths=[], path_guards = None):
     """
     a change on frontend/browser is recorded in cfg_ui and in appstate.
     update cfg_CM based on dependency
     """
-    all_changed_paths = [_ for _ in appstate.get_changed_history(path_guards=path_guards)]
+    all_changed_paths = [_ for _ in appstate.get_changed_history()]
+    logger.debug (f"appstate:all_changed_paths {all_changed_paths}")
     for kpath in all_changed_paths:
         new_val = oj.dget(appstate, kpath)
         logger.debug(
             f"{kpath} has changed in appstate to  new_value={new_val}")
         yield from uiops_for_appstate_change_ctx_kpath(
-            kpath, new_val, app_ui_trmap, appstate)
+            kpath, new_val, appctx_uiupdate_map, appstate)
 
     for kpath in new_inactive_kpaths:
         logger.debug("inactive paths are not implemented yet")
@@ -165,11 +177,12 @@ def refresh_uistate(app_ui_trmap, uistate, stubStore):
 
 
 class WebPage(jp.WebPage):
-    def __init__(self, ui_app_trmap_iter=None, app_ui_trmap_iter=None,  app_actions_trmap_iter=None, session_manager=None, path_guards = None, enable_quasar=False,  **kwargs):
+    def __init__(self, ui_app_trmap_iter=None,  session_manager=None, path_guards = None, enable_quasar=False, action_module=None,  **kwargs):
         """
         cfg_CM: config component meta
         uiState_dependencyGraph_iter: list for each dbref behaves in various Ctx. 
         actions_dependencyGraph_iter: actions to execute in various context
+        action_module: module with all the actions/functions that defines reaction. 
         """
 
         super().__init__(**kwargs)
@@ -180,32 +193,41 @@ class WebPage(jp.WebPage):
         self.session_manager = session_manager
         self.appstate = session_manager.appstate
         self.stubStore = session_manager.stubStore
+        self.path_guards = path_guards
+
+        # ============ build appctx to action trigger map ============
+        self.app_actions_trmap = Dict(track_changes=True)
+        for afunc in list_functions(action_module):
+            doctoks = inspect.getdoc(afunc).split()
+            if doctoks:
+                if 'appctx' in doctoks[0]:
+                    spath = doctoks[0].split(":")[1]
+                    oj.dnew(self.app_actions_trmap, spath, [afunc])
+                    
+
+        # build appctx to ui update map
+        self.appctx_uiupdate_map = Dict(track_changes=True)
+        for spath, stub in oj.dictWalker(self.stubStore):
+            if 'reactctx' in stub.kwargs:
+                print("reactui", spath, stub)
+                print(stub.kwargs.get('reactctx'))
+                for appchangectx in stub.kwargs.get('reactctx'):
+                    oj.dnew(self.appctx_uiupdate_map, appchangectx.apppath, (spath, appchangectx))
+                  
         #stores the value/state of active/input ui components
         self.uistate = Dict(track_changes=True)
-        #mapping appstate change context to ui ops per ui component
-        self.app_ui_trmap = Dict(track_changes=True)
-        self.path_guards = path_guards
-        #mapping from ui state change to appstate changes
+
+        #mapping from uistate changes to appstate 
         self.ui_app_trmap = Dict(track_changes=True)
-        #mapping from appstate changes to backend/appstate actions
-        self.app_actions_trmap = Dict(track_changes=True)        
-        
-        for spath, attrmeta in app_ui_trmap_iter:
-            oj.dnew(self.app_ui_trmap, spath, attrmeta)
-        # list of 2item tuples: spath, apppath, transformation
-        for spath, appchangectx in ui_app_trmap_iter:
-            oj.dnew(self.ui_app_trmap, spath, appchangectx)
+        for uipath, apppath, valop  in ui_app_trmap_iter:
+            oj.dnew(self.ui_app_trmap, uipath, (apppath, valop))
 
-        for spath, actions_directives in app_actions_trmap_iter:
-            oj.dnew(self.app_actions_trmap, spath, actions_directives)
-
-        #set all paths from app_ui_tr to uistate
-        refresh_uistate(self.app_ui_trmap, self.uistate, self.stubStore)
+        #refresh_uistate(self.appctx_uiupdate_map, self.uistate, self.stubStore)
         self.ui_app_trmap.clear_changed_history()
         self.uistate.clear_changed_history()
-        self.app_ui_trmap.clear_changed_history()
-        logger.debug("----app_ui_trmap----")
-        logger.debug(self.app_ui_trmap)
+        self.appctx_uiupdate_map.clear_changed_history()
+        logger.debug("----appctx_uiupdate_map----")
+        logger.debug(self.appctx_uiupdate_map)
 
         logger.debug("----ui_app_trmap----")
         logger.debug(self.ui_app_trmap)
@@ -221,10 +243,17 @@ class WebPage(jp.WebPage):
         """
         set value of cfg_ui at spath value
         """
-        old_val = oj.dget(self.uistate, spath)
-        logger.debug(
-             f"react:update-uistate-post-event-handle: update key={spath} from {old_val} to new value {value}")
-        oj.dupdate(self.uistate, spath, value)
+        try:
+            old_val = oj.dget(self.uistate, spath)
+            logger.debug(
+                f"react:update-uistate-post-event-handle: update key={spath} from {old_val} to new value {value}")
+            oj.dupdate(self.uistate, spath, value)
+        except KeyError as e:
+            oj.dnew(self.uistate, spath, value)
+            logger.debug(
+                f"react:update-uistate-post-event-handle: update key={spath} from undef to new value {value}")
+            
+
 
     def update_loop(self):
         """
@@ -233,6 +262,8 @@ class WebPage(jp.WebPage):
 
         in this function we loop:
         1. update appstate for uistate changes via ui_app_trmap
+        2. perform actions
+        3. update ui
 
         """
 
@@ -240,55 +271,47 @@ class WebPage(jp.WebPage):
         
         for _ in self.uistate.get_changed_history():
             uival = oj.dget(self.uistate, _)
-            print(f"uistate:change path {_}")
+            logger.debug(f"ui-->app: ui changed path {_}")
             app_path = None
             if oj.dsearch(self.ui_app_trmap, _):
                 app_path, value_tranformer = oj.dget(self.ui_app_trmap, _)
+                appval = uival
                 if value_tranformer:
                     appval = value_tranformer(uival)
-                else:
-                    appval = uival
-                    
-            else:
-                try:
-                    res = oj.dget(self.appstate, _)
-                    # as long as path exists, update appstate
-                    if res == None or res:
+            elif oj.dsearch(self.appstate, _):
+                app_path = _
+                appval = uival
 
-                        app_path = _
-                        appval = uival
-                        
-                except KeyError as e:
-                    print(f"path {_} not in appstate: will not change appstate")
-                except Exception as e:
-                    print("here {e}")
-                    raise e
             if app_path:
-                logger.debug(f"update appstate path={app_path} {appval}")
-                oj.dupdate(self.appstate, app_path,  appval)
-
-        logger.debug("===============================end react:update_loop:ui->appstate=================================")
+                logger.debug(f"ui-->app: apppath={app_path} appval={appval}")
+                if oj.dsearch(self.appstate, _):
+                    oj.dupdate(self.appstate, app_path,  appval)
+                else:
+                    oj.dnew(self.appstate, app_path,  appval)
+                
+            else:
+                logger.debug("path {_} does not exists in appstate or ui_app_trmap: skipping")
+                
+        logger.debug("===============================end react:ui->app=================================")
         # perform actions for updated appstate
         
         appstate_changeset = [_ for _ in self.appstate.get_changed_history(path_guards = self.path_guards)]
-        self.appstate.clear_changed_history()
         logger.debug(f"post ui-->app state update:  appstate changes {appstate_changeset}")
         for kpath in appstate_changeset:
             kval = oj.dget(self.appstate, kpath)
             if oj.dsearch(self.app_actions_trmap, kpath):
-                logger.debug(f"TODO: Exec actions for {kpath}, {kval}")
+                logger.debug(f"Exec actions for {kpath}, {kval}")
                 #TODO: handle series of actions
                 action_fns = oj.dget(self.app_actions_trmap, kpath)
                 for action_fn in action_fns:
-                    action_fn(self.appstate, None)
+                    action_fn(self.appstate, kval)
                 #print("status post op = ", self.appstate.op_status)
             pass
 
         # actions and cfg_ui have updated appstate  ==> try to update cfg_CM and the ui
-        for kpath, kval, uiop in uiops_for_appstate_change_ctx(self.appstate, self.app_ui_trmap, path_guards = self.path_guards):
-            logger.debug(f"uiop on kpath: {kpath} {kval} {uiop}")
-            print("stubstore=", self.stubStore)
-            target_dbref = oj.dget(self.stubStore, kpath).target
+        for spath,  kval, uiop in uiops_for_appstate_change_ctx(self.appstate, self.appctx_uiupdate_map, path_guards = self.path_guards):
+            logger.debug(f"uiop on ui: {spath} {kval} {uiop}")
+            target_dbref = oj.dget(self.stubStore, spath).target
             match uiop:
                 case UIOps.ENABLE:
                     target_dbref.remove_class("disabled")
@@ -300,6 +323,7 @@ class WebPage(jp.WebPage):
                 case UIOps.UPDATE_TEXT:
                     logger.debug("in uiops.update_text: ")
                     #TODO: when it is text vs. placeholder
+
                     target_dbref.placeholder = kval
                 case UIOps.REDIRECT:
                     logger.debug(f"in uiops.redirect for : {target_dbref.stub.key} {kval}" )
@@ -307,6 +331,9 @@ class WebPage(jp.WebPage):
                     #TODO: when it is text vs. placeholder
                     #target_dbref.placeholder = kval                
         self.appstate.clear_changed_history()
+
+
+        
         pass
 
     
