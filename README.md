@@ -29,7 +29,8 @@ this is invoked after following
 sequence of events:
 - user performs actions
 - event_handler is fired 
-- uistate is updated 
+- uistate is updated   
+
 The update_loop does following
 - update appstate (using ui_app_trmap and changes to uistate)
 - invoke actions based on appstate changes and app_actions_trmap (this can introduce further appstate)
@@ -39,4 +40,4 @@ The update_loop does following
 
 ## Action annotations
 ### ojr.AppctxTrigger(<path>)
-Invoke the action if appstate has changed at "<path>" path. 
+Annotate an action. Registers the action to be invoked when appstate has changed at `path` path. 
