@@ -1,8 +1,28 @@
 # ofjustpy-react
 
+## Programatics
+### Setup 
+- uistate paths are seeded from ui_app_trmap
+- if path is not in appstate, then its not updated. 
+
+### event handler to ui-state updates
+1. decorate with @ojr.CfgLoopRunner
+2. return spath, svalue 
+
+The ojr framework will update appstate path `spath` with `svalue`
+
+### reactctx for stubs: for appstat to ui-update 
+add reactctx to stubs 
+```
+oj.Span_("aspan", placeholder="dummy text",
+                 reactctx = [ojr.Ctx("/cfgbase/type", ojr.isstr, ojr.UIOps.UPDATE_TEXT)]
+                 )
+```
+checkout ./ofjustpy-react/unit_tests/td.py
+
 
 ## Webapp state management
-modeling state and its transitions
+modeling state and its transitions 
 ### State variables
 #### appstate
 owned by session_manager

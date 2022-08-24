@@ -75,6 +75,10 @@ class UIOps(Enum):
 
     #redirect to new page
     REDIRECT = auto()
+
+    # call deck.bring_to_front
+    DECK_SHUFFLE = auto()
+    
     
 def components_in_appstate_changectx(apppath, val,  appctx_uiupdate_map):
     """
@@ -87,7 +91,7 @@ def components_in_appstate_changectx(apppath, val,  appctx_uiupdate_map):
         if appchangectx.condition(val):
             yield spath, appchangectx
     except Exception as e:
-        logger.debug(f"{kpath} not in appctx_uiupdate_map {e}")
+        logger.debug(f"{apppath} not in appctx_uiupdate_map {e}")
 
                     
 def uiops_for_appstate_change_ctx_kpath(kpath, val, appctx_uiupdate_map, appstate):
@@ -211,7 +215,7 @@ class WebPage(jp.WebPage):
             if 'reactctx' in stub.kwargs:
                 print("reactui", spath, stub)
                 print(stub.kwargs.get('reactctx'))
-                for appchangectx in stub.kwargs.get('reactctx'):
+                for appchangectx in stub.kwargs.get('reactctx'):#TODO: what if apppath already exists
                     oj.dnew(self.appctx_uiupdate_map, appchangectx.apppath, (spath, appchangectx))
                   
         #stores the value/state of active/input ui components
@@ -228,13 +232,10 @@ class WebPage(jp.WebPage):
         self.appctx_uiupdate_map.clear_changed_history()
         logger.debug("----appctx_uiupdate_map----")
         logger.debug(self.appctx_uiupdate_map)
-
         logger.debug("----ui_app_trmap----")
         logger.debug(self.ui_app_trmap)
-
         logger.debug("----appstate----")
         logger.debug(self.appstate)
-
         logger.debug("----uistate----")
         logger.debug(self.uistate)
         
@@ -273,6 +274,7 @@ class WebPage(jp.WebPage):
             uival = oj.dget(self.uistate, _)
             logger.debug(f"ui-->app: ui changed path {_}")
             app_path = None
+            appval = None
             if oj.dsearch(self.ui_app_trmap, _):
                 app_path, value_tranformer = oj.dget(self.ui_app_trmap, _)
                 appval = uival
@@ -282,6 +284,7 @@ class WebPage(jp.WebPage):
                 app_path = _
                 appval = uival
 
+            logger.debug(f"ui->app: post search {app_path} {appval}")
             if app_path:
                 logger.debug(f"ui-->app: apppath={app_path} appval={appval}")
                 if oj.dsearch(self.appstate, _):
@@ -290,7 +293,7 @@ class WebPage(jp.WebPage):
                     oj.dnew(self.appstate, app_path,  appval)
                 
             else:
-                logger.debug("path {_} does not exists in appstate or ui_app_trmap: skipping")
+                logger.debug(f"path {_} does not exists in appstate or ui_app_trmap: skipping")
                 
         logger.debug("===============================end react:ui->app=================================")
         # perform actions for updated appstate
@@ -320,11 +323,19 @@ class WebPage(jp.WebPage):
                     pass
                 case UIOps.UPDATE_NOTICEBOARD:
                     print("notice board not yet implemented")
+                case UIOps.DECK_SHUFFLE:
+                    target_dbref.bring_to_front(kval)
                 case UIOps.UPDATE_TEXT:
                     logger.debug("in uiops.update_text: ")
                     #TODO: when it is text vs. placeholder
-
-                    target_dbref.placeholder = kval
+                    print ("html_tag = ", target_dbref.html_tag)
+                    match target_dbref.html_tag:
+                        case 'input':
+                             target_dbref.placeholder = kval
+                        case 'span':
+                             target_dbref.text = kval
+                        case _:
+                             print("unkown how to update text for : ", target_dbref.html_tag)
                 case UIOps.REDIRECT:
                     logger.debug(f"in uiops.redirect for : {target_dbref.stub.key} {kval}" )
                     target_dbref.redirect = kval
