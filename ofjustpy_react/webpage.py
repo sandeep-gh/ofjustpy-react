@@ -78,6 +78,8 @@ class UIOps(Enum):
 
     # call deck.bring_to_front
     DECK_SHUFFLE = auto()
+
+    DEBUG = auto()
     
     
 def components_in_appstate_changectx(apppath, val,  appctx_uiupdate_map):
@@ -247,12 +249,12 @@ class WebPage(jp.WebPage):
         try:
             old_val = oj.dget(self.uistate, spath)
             logger.debug(
-                f"react:update-uistate-post-event-handle: update key={spath} from {old_val} to new value {value}")
+                f"react:update-uistate:update-existing-path: key/path={spath}  old_val = {old_val} new_value= {value}")
             oj.dupdate(self.uistate, spath, value)
         except KeyError as e:
             oj.dnew(self.uistate, spath, value)
             logger.debug(
-                f"react:update-uistate-post-event-handle: update key={spath} from undef to new value {value}")
+                f"react:update-uistate:add-new-path-and-value: update key={spath}, value={value}")
             
 
 
@@ -272,7 +274,7 @@ class WebPage(jp.WebPage):
         
         for _ in self.uistate.get_changed_history():
             uival = oj.dget(self.uistate, _)
-            logger.debug(f"ui-->app: ui changed path {_}")
+            logger.debug(f"visiting ui changed path: {_}")
             app_path = None
             appval = None
             if oj.dsearch(self.ui_app_trmap, _):
@@ -284,16 +286,18 @@ class WebPage(jp.WebPage):
                 app_path = _
                 appval = uival
 
-            logger.debug(f"ui->app: post search {app_path} {appval}")
+            logger.debug(f"post search-and-transformer: app_path={app_path},  appval={appval}")
             if app_path:
-                logger.debug(f"ui-->app: apppath={app_path} appval={appval}")
                 if oj.dsearch(self.appstate, _):
+                    logger.debug(f"update-appstate:existing path: app_path={app_path} value={appval}")
                     oj.dupdate(self.appstate, app_path,  appval)
                 else:
+                    logger.debug(f"update-appstate:new path: app_path={app_path} value={appval}")
+
                     oj.dnew(self.appstate, app_path,  appval)
                 
             else:
-                logger.debug(f"path {_} does not exists in appstate or ui_app_trmap: skipping")
+                logger.debug(f"path {_} does not exists in appstate or in ui_app_trmap: skipping")
                 
         logger.debug("===============================end react:ui->app=================================")
         # perform actions for updated appstate
@@ -340,7 +344,9 @@ class WebPage(jp.WebPage):
                     logger.debug(f"in uiops.redirect for : {target_dbref.stub.key} {kval}" )
                     target_dbref.redirect = kval
                     #TODO: when it is text vs. placeholder
-                    #target_dbref.placeholder = kval                
+                    #target_dbref.placeholder = kval
+                case UIOps.DEBUG:
+                    logger.debug(f"I am at debug with kval  = {kval}")
         self.appstate.clear_changed_history()
 
 

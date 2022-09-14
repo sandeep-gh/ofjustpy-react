@@ -145,8 +145,8 @@ def CfgLoopRunner(func):
         sspath, svalue = func(*args, **kwargs)
         # if not value: 
         #     value = msg.value
-        logger.debug(f"=====> begin cfgLoopRunner: react-to-event: {sspath} {svalue}")
-        #
+        logger.debug(f"=====> begin cfgLoopRunner: react-to-event")
+        logger.debug(f"event_handler = {func}, uipath={sspath}, uivalue={svalue}")
         wp.update_uistate(sspath, svalue)
         wp.update_loop()
         logger.debug("=====> end cfgLoopRunner")
