@@ -348,7 +348,7 @@ class WebPage(jp.WebPage):
                 case UIOps.DEBUG:
                     logger.debug(f"I am at debug with kval  = {kval}")
         self.appstate.clear_changed_history()
-
+        self.uistate.clear_changed_history()
 
         
         pass
