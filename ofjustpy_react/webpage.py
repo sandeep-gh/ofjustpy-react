@@ -81,6 +81,7 @@ class UIOps(Enum):
 
     DEBUG = auto()
     
+    UPDATE_CHART = auto()
     
 def components_in_appstate_changectx(apppath, val,  appctx_uiupdate_map):
     """
@@ -101,7 +102,7 @@ def uiops_for_appstate_change_ctx_kpath(kpath, val, appctx_uiupdate_map, appstat
     update cfgCM in response to  changes in appstate at kpath
     """
 
-    logger.debug(f"evaluation ctx: apppath:{kpath} val={val}")
+    #logger.debug(f"evaluation ctx: apppath:{kpath} val={val}")
     affected_uis = [
         _ for _ in components_in_appstate_changectx(kpath, val,  appctx_uiupdate_map)]
     for spath, appchangectx in affected_uis:
@@ -115,8 +116,8 @@ def uiops_for_appstate_change_ctx_kpath(kpath, val, appctx_uiupdate_map, appstat
         #         #am.is_enabled = True
         #     case UIOps.DISABLE:
         #         #dset(cfg_ui, path, "disabled")
-        logger.info(
-            f"changing ui for {spath} with uiop {appchangectx.uiop}")
+        # logger.info(
+        #     f"changing ui for {spath} with uiop {appchangectx.uiop}")
 
         yield spath, val, appchangectx.uiop
 
@@ -127,12 +128,12 @@ def uiops_for_appstate_change_ctx(appstate, appctx_uiupdate_map, new_inactive_kp
     a change on frontend/browser is recorded in cfg_ui and in appstate.
     update cfg_CM based on dependency
     """
-    all_changed_paths = [_ for _ in appstate.get_changed_history()]
-    logger.debug (f"appstate:all_changed_paths {all_changed_paths}")
+    all_changed_paths = [_ for _ in appstate.get_changed_history(path_guards = path_guards)]
+    #logger.debug (f"appstate:all_changed_paths {all_changed_paths}")
     for kpath in all_changed_paths:
         new_val = oj.dget(appstate, kpath)
-        logger.debug(
-            f"{kpath} has changed in appstate to  new_value={new_val}")
+        # logger.debug(
+        #     f"{kpath} has changed in appstate to  new_value={new_val}")
         yield from uiops_for_appstate_change_ctx_kpath(
             kpath, new_val, appctx_uiupdate_map, appstate)
 
@@ -140,7 +141,7 @@ def uiops_for_appstate_change_ctx(appstate, appctx_uiupdate_map, new_inactive_kp
         logger.debug("inactive paths are not implemented yet")
         pass
 
-    logger.debug("done update ui for appstate cha...")
+    #logger.debug("done update ui for appstate cha...")
 
 
 #initialize ui_app_trmap from app_ui_trmap    
@@ -183,7 +184,7 @@ def refresh_uistate(app_ui_trmap, uistate, stubStore):
 
 
 class WebPage(jp.WebPage):
-    def __init__(self, ui_app_trmap_iter=None,  session_manager=None, path_guards = None, enable_quasar=False, action_module=None,  **kwargs):
+    def __init__(self, ui_app_trmap_iter=[],  session_manager=None, path_guards = None, enable_quasar=False, action_module=None,  **kwargs):
         """
         cfg_CM: config component meta
         uiState_dependencyGraph_iter: list for each dbref behaves in various Ctx. 
@@ -203,17 +204,21 @@ class WebPage(jp.WebPage):
 
         # ============ build appctx to action trigger map ============
         self.app_actions_trmap = Dict(track_changes=True)
-        for afunc in list_functions(action_module):
-            doctoks = inspect.getdoc(afunc).split()
-            if doctoks:
-                if 'appctx' in doctoks[0]:
-                    spath = doctoks[0].split(":")[1]
-                    oj.dnew(self.app_actions_trmap, spath, [afunc])
-                    
+        if action_module:
+            for afunc in list_functions(action_module):
+                if inspect.getdoc(afunc) is None:
+                    continue
+                doctoks = inspect.getdoc(afunc).split()
+                if doctoks:
+                    if 'appctx' in doctoks[0]:
+                        spath = doctoks[0].split(":")[1]
+                        oj.dnew(self.app_actions_trmap, spath, [afunc])
+
 
         # build appctx to ui update map
         self.appctx_uiupdate_map = Dict(track_changes=True)
         for spath, stub in oj.dictWalker(self.stubStore):
+
             if 'reactctx' in stub.kwargs:
                 print("reactui", spath, stub)
                 print(stub.kwargs.get('reactctx'))
@@ -236,6 +241,9 @@ class WebPage(jp.WebPage):
         logger.debug(self.appctx_uiupdate_map)
         logger.debug("----ui_app_trmap----")
         logger.debug(self.ui_app_trmap)
+        logger.debug("----app_actions_trmap----")
+        logger.debug(self.app_actions_trmap)
+
         logger.debug("----appstate----")
         logger.debug(self.appstate)
         logger.debug("----uistate----")
@@ -249,15 +257,19 @@ class WebPage(jp.WebPage):
         try:
             old_val = oj.dget(self.uistate, spath)
             logger.debug(
-                f"react:update-uistate:update-existing-path: key/path={spath}  old_val = {old_val} new_value= {value}")
+                f"Phase 1: update-uistate:   update ui: key/path={spath};  old_val = {old_val};  new_value= {value}")
             oj.dupdate(self.uistate, spath, value)
         except KeyError as e:
             oj.dnew(self.uistate, spath, value)
             logger.debug(
-                f"react:update-uistate:add-new-path-and-value: update key={spath}, value={value}")
-            
+                f"Phase 1:update_uistate:add-new-path-and-value: update key={spath}, value={value}")
+        
 
 
+    def build_list(self):
+        print ("calling ojr.Webpages' build_list")
+        return super().build_list()
+    
     def update_loop(self):
         """
         user has changed the state of ui input component.
@@ -270,11 +282,11 @@ class WebPage(jp.WebPage):
 
         """
 
-        logger.debug("===============================begin react:update_loop:ui->appstate=================================")
+        logger.debug("*********** Begin Phase 2: update appstate (from ui)")
         
         for _ in self.uistate.get_changed_history():
             uival = oj.dget(self.uistate, _)
-            logger.debug(f"visiting ui changed path: {_}")
+            logger.debug(f"             changed ui path: {_}")
             app_path = None
             appval = None
             if oj.dsearch(self.ui_app_trmap, _):
@@ -286,69 +298,82 @@ class WebPage(jp.WebPage):
                 app_path = _
                 appval = uival
 
-            logger.debug(f"post search-and-transformer: app_path={app_path},  appval={appval}")
+
             if app_path:
                 if oj.dsearch(self.appstate, _):
-                    logger.debug(f"update-appstate:existing path: app_path={app_path} value={appval}")
+                    logger.debug(f"            matching app path:update: {app_path} with appval={appval}")
                     oj.dupdate(self.appstate, app_path,  appval)
                 else:
-                    logger.debug(f"update-appstate:new path: app_path={app_path} value={appval}")
-
+                    logger.debug(f"            matching app path:new: {app_path} with appval={appval}")
                     oj.dnew(self.appstate, app_path,  appval)
                 
             else:
                 logger.debug(f"path {_} does not exists in appstate or in ui_app_trmap: skipping")
                 
-        logger.debug("===============================end react:ui->app=================================")
+ 
         # perform actions for updated appstate
-        
-        appstate_changeset = [_ for _ in self.appstate.get_changed_history(path_guards = self.path_guards)]
-        logger.debug(f"post ui-->app state update:  appstate changes {appstate_changeset}")
-        for kpath in appstate_changeset:
-            kval = oj.dget(self.appstate, kpath)
-            if oj.dsearch(self.app_actions_trmap, kpath):
-                logger.debug(f"Exec actions for {kpath}, {kval}")
-                #TODO: handle series of actions
-                action_fns = oj.dget(self.app_actions_trmap, kpath)
-                for action_fn in action_fns:
-                    action_fn(self.appstate, kval)
-                #print("status post op = ", self.appstate.op_status)
-            pass
+        logger.debug("*********** End Phase 2: update appstate")
 
-        # actions and cfg_ui have updated appstate  ==> try to update cfg_CM and the ui
-        for spath,  kval, uiop in uiops_for_appstate_change_ctx(self.appstate, self.appctx_uiupdate_map, path_guards = self.path_guards):
-            logger.debug(f"uiop on ui: {spath} {kval} {uiop}")
-            target_dbref = oj.dget(self.stubStore, spath).target
-            match uiop:
-                case UIOps.ENABLE:
-                    target_dbref.remove_class("disabled")
-                    pass
-                case UIOps.DISABLE:
-                    pass
-                case UIOps.UPDATE_NOTICEBOARD:
-                    print("notice board not yet implemented")
-                case UIOps.DECK_SHUFFLE:
-                    target_dbref.bring_to_front(kval)
-                case UIOps.UPDATE_TEXT:
-                    logger.debug("in uiops.update_text: ")
-                    #TODO: when it is text vs. placeholder
-                    print ("html_tag = ", target_dbref.html_tag)
-                    match target_dbref.html_tag:
-                        case 'input':
-                             target_dbref.placeholder = kval
-                        case 'span':
-                             target_dbref.text = kval
-                        case _:
-                             print("unkown how to update text for : ", target_dbref.html_tag)
-                case UIOps.REDIRECT:
-                    logger.debug(f"in uiops.redirect for : {target_dbref.stub.key} {kval}" )
-                    target_dbref.redirect = kval
-                    #TODO: when it is text vs. placeholder
-                    #target_dbref.placeholder = kval
-                case UIOps.DEBUG:
-                    logger.debug(f"I am at debug with kval  = {kval}")
-        self.appstate.clear_changed_history()
-        self.uistate.clear_changed_history()
+        for bigloop in range(2):
+            logger.debug(f"*********** Begin Phase 3: trigger actions; bigloop:{bigloop}")
+
+            appstate_changeset = [_ for _ in self.appstate.get_changed_history(path_guards = self.path_guards)]
+            #logger.debug(f"post ui-->app state update:  appstate changes {appstate_changeset}")
+            for kpath in appstate_changeset:
+                logger.debug (f"            visiting appstate path: {kpath}")
+                kval = oj.dget(self.appstate, kpath)
+                if oj.dsearch(self.app_actions_trmap, kpath):
+
+                    #TODO: handle series of actions
+                    action_fns = oj.dget(self.app_actions_trmap, kpath)
+                    logger.debug(f"       actions invoked: {action_fns}" )
+                    for action_fn in action_fns:
+                        action_fn(self.appstate, kval)
+                    #print("status post op = ", self.appstate.op_status)
+                pass
+
+            # actions and cfg_ui have updated appstate  ==> try to update cfg_CM and the ui
+            logger.debug("*********** End Phase 3: trigger actions")
+
+            logger.debug("*********** Begin Phase 4: Update UI")
+            for spath,  kval, uiop in uiops_for_appstate_change_ctx(self.appstate, self.appctx_uiupdate_map, path_guards = self.path_guards):
+                logger.debug(f" visiting app path: {spath} uiop:{uiop} val:{kval}")
+                target_dbref = oj.dget(self.stubStore, spath).target
+                match uiop:
+                    case UIOps.ENABLE:
+                        target_dbref.remove_class("disabled")
+                        pass
+                    case UIOps.DISABLE:
+                        pass
+                    case UIOps.UPDATE_NOTICEBOARD:
+                        print("notice board not yet implemented")
+                    case UIOps.DECK_SHUFFLE:
+                        target_dbref.bring_to_front(kval)
+                    case UIOps.UPDATE_CHART:
+                        t = t
+                        logger.debug("Update chart called with stub path/key", spath, " val = ", kval)
+                        #target_dbref.update_chart(kval)                     
+                    case UIOps.UPDATE_TEXT:
+                        logger.debug("in uiops.update_text: ")
+                        #TODO: when it is text vs. placeholder
+                        print ("html_tag = ", target_dbref.html_tag)
+                        match target_dbref.html_tag:
+                            case 'input':
+                                 target_dbref.placeholder = kval
+                            case 'span':
+                                 target_dbref.text = kval
+                            case _:
+                                 print("unkown how to update text for : ", target_dbref.html_tag)
+                    case UIOps.REDIRECT:
+                        logger.debug(f"in uiops.redirect for : {target_dbref.stub.key} {kval}" )
+                        target_dbref.redirect = kval
+                        #TODO: when it is text vs. placeholder
+                        #target_dbref.placeholder = kval
+                    case UIOps.DEBUG:
+                        logger.debug(f"I am at debug with kval  = {kval}")
+            self.appstate.clear_changed_history()
+            self.uistate.clear_changed_history()
+            logger.debug("*********** End Phase 4: Update UI")
 
         
         pass

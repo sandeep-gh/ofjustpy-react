@@ -134,7 +134,7 @@ def CfgLoopRunner(func):
         '''
         #func(*args, **kwargs)
         #run_looprunner(page, rts)
-
+        print ("ha")
         dbref = args[0]
         spath = dbref.stub.spath
         msg = args[1]
@@ -145,11 +145,12 @@ def CfgLoopRunner(func):
         sspath, svalue = func(*args, **kwargs)
         # if not value: 
         #     value = msg.value
-        logger.debug(f"=====> begin cfgLoopRunner: react-to-event")
-        logger.debug(f"event_handler = {func}, uipath={sspath}, uivalue={svalue}")
+        logger.debug(f"===============================================BEGIN REACT LOOP================================>")
+        logger.debug(f"reacting on event = {func}, uipath={sspath}, uivalue={svalue}")
         wp.update_uistate(sspath, svalue)
         wp.update_loop()
-        logger.debug("=====> end cfgLoopRunner")
+        logger.debug(f"===============================================END REACT LOOP================================>")
+
 
         pass
         # func(*args, **kwargs)

@@ -127,3 +127,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+ofjustpy_react/webpage.py
