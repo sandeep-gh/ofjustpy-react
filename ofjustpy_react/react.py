@@ -134,9 +134,8 @@ def CfgLoopRunner(func):
         '''
         #func(*args, **kwargs)
         #run_looprunner(page, rts)
-        print ("ha")
-        dbref = args[0]
-        spath = dbref.stub.spath
+        #dbref = args[0]
+        #spath = dbref.stub.spath
         msg = args[1]
 
         wp = msg.page

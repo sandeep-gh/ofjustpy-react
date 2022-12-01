@@ -97,7 +97,7 @@ def components_in_appstate_changectx(apppath, val,  appctx_uiupdate_map):
         logger.debug(f"{apppath} not in appctx_uiupdate_map {e}")
 
                     
-def uiops_for_appstate_change_ctx_kpath(kpath, val, appctx_uiupdate_map, appstate):
+def uiops_for_appstate_change_ctx_kpath(kpath, val, appctx_uiupdate_map):
     """
     update cfgCM in response to  changes in appstate at kpath
     """
@@ -123,19 +123,26 @@ def uiops_for_appstate_change_ctx_kpath(kpath, val, appctx_uiupdate_map, appstat
 
 
 
-def uiops_for_appstate_change_ctx(appstate, appctx_uiupdate_map, new_inactive_kpaths=[], path_guards = None):
+
+#def uiops_for_appstate_change_ctx(appstate, appctx_uiupdate_map, new_inactive_kpaths=[], path_guards = None):
+def uiops_for_appstate_change_ctx(appstate_all_changed_paths,
+                                  appctx_uiupdate_map,
+                                  appstate,
+                                  new_inactive_kpaths=[],
+                                  path_guards = None):
+    
     """
     a change on frontend/browser is recorded in cfg_ui and in appstate.
     update cfg_CM based on dependency
     """
-    all_changed_paths = [_ for _ in appstate.get_changed_history(path_guards = path_guards)]
+    #all_changed_paths = [_ for _ in appstate.get_changed_history(path_guards = path_guards)]
     #logger.debug (f"appstate:all_changed_paths {all_changed_paths}")
-    for kpath in all_changed_paths:
+    for kpath in appstate_all_changed_paths:
         new_val = oj.dget(appstate, kpath)
         # logger.debug(
         #     f"{kpath} has changed in appstate to  new_value={new_val}")
         yield from uiops_for_appstate_change_ctx_kpath(
-            kpath, new_val, appctx_uiupdate_map, appstate)
+            kpath, new_val, appctx_uiupdate_map)
 
     for kpath in new_inactive_kpaths:
         logger.debug("inactive paths are not implemented yet")
@@ -220,8 +227,6 @@ class WebPage(jp.WebPage):
         for spath, stub in oj.dictWalker(self.stubStore):
 
             if 'reactctx' in stub.kwargs:
-                print("reactui", spath, stub)
-                print(stub.kwargs.get('reactctx'))
                 for appchangectx in stub.kwargs.get('reactctx'):#TODO: what if apppath already exists
                     oj.dnew(self.appctx_uiupdate_map, appchangectx.apppath, (spath, appchangectx))
                   
@@ -267,7 +272,6 @@ class WebPage(jp.WebPage):
 
 
     def build_list(self):
-        print ("calling ojr.Webpages' build_list")
         return super().build_list()
     
     def update_loop(self):
@@ -312,14 +316,16 @@ class WebPage(jp.WebPage):
                 
  
         # perform actions for updated appstate
+        self.uistate.clear_changed_history()
         logger.debug("*********** End Phase 2: update appstate")
 
-        for bigloop in range(2):
+        for bigloop in range(3):
             logger.debug(f"*********** Begin Phase 3: trigger actions; bigloop:{bigloop}")
 
-            appstate_changeset = [_ for _ in self.appstate.get_changed_history(path_guards = self.path_guards)]
+            appstate_all_changed_paths = [_ for _ in self.appstate.get_changed_history(path_guards = self.path_guards)]
+            self.appstate.clear_changed_history()
             #logger.debug(f"post ui-->app state update:  appstate changes {appstate_changeset}")
-            for kpath in appstate_changeset:
+            for kpath in appstate_all_changed_paths :
                 logger.debug (f"            visiting appstate path: {kpath}")
                 kval = oj.dget(self.appstate, kpath)
                 if oj.dsearch(self.app_actions_trmap, kpath):
@@ -329,14 +335,13 @@ class WebPage(jp.WebPage):
                     logger.debug(f"       actions invoked: {action_fns}" )
                     for action_fn in action_fns:
                         action_fn(self.appstate, kval)
-                    #print("status post op = ", self.appstate.op_status)
                 pass
 
             # actions and cfg_ui have updated appstate  ==> try to update cfg_CM and the ui
             logger.debug("*********** End Phase 3: trigger actions")
 
             logger.debug("*********** Begin Phase 4: Update UI")
-            for spath,  kval, uiop in uiops_for_appstate_change_ctx(self.appstate, self.appctx_uiupdate_map, path_guards = self.path_guards):
+            for spath,  kval, uiop in uiops_for_appstate_change_ctx(appstate_all_changed_paths, self.appctx_uiupdate_map, self.appstate):
                 logger.debug(f" visiting app path: {spath} uiop:{uiop} val:{kval}")
                 target_dbref = oj.dget(self.stubStore, spath).target
                 match uiop:
@@ -350,13 +355,12 @@ class WebPage(jp.WebPage):
                     case UIOps.DECK_SHUFFLE:
                         target_dbref.bring_to_front(kval)
                     case UIOps.UPDATE_CHART:
-                        t = t
-                        logger.debug("Update chart called with stub path/key", spath, " val = ", kval)
+                        logger.debug("Update chart called with stub path/key: {spath} {kval}")
+                        target_dbref.update_chart(kval[0], kval[1])
                         #target_dbref.update_chart(kval)                     
                     case UIOps.UPDATE_TEXT:
                         logger.debug("in uiops.update_text: ")
                         #TODO: when it is text vs. placeholder
-                        print ("html_tag = ", target_dbref.html_tag)
                         match target_dbref.html_tag:
                             case 'input':
                                  target_dbref.placeholder = kval
@@ -371,8 +375,8 @@ class WebPage(jp.WebPage):
                         #target_dbref.placeholder = kval
                     case UIOps.DEBUG:
                         logger.debug(f"I am at debug with kval  = {kval}")
-            self.appstate.clear_changed_history()
-            self.uistate.clear_changed_history()
+            #self.appstate.clear_changed_history()
+            #self.uistate.clear_changed_history()
             logger.debug("*********** End Phase 4: Update UI")
 
         
